@@ -14,6 +14,53 @@ import org.kie.api.runtime.process.WorkItemManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * A custom jBPM {@link org.kie.api.runtime.process.WorkItemHandler} that dynamically compiles and
+ * hot-swaps Drools Rule Language (DRL) definitions into an active {@link org.kie.api.runtime.KieContainer}
+ * at runtime without requiring a KJAR redeployment or server restart.
+ *
+ * <h2>How It Works</h2>
+ * <p>When executed within a BPMN process, this handler constructs an in-memory {@link org.kie.api.builder.KieFileSystem}
+ * and performs a live KJAR version bump:</p>
+ * <ol>
+ *   <li><b>Asset Preservation:</b> Iterates through the active {@link org.drools.compiler.kie.builder.impl.InternalKieModule}
+ *       to copy all existing project resources—including {@code .bpmn} process definitions, compiled {@code .class}
+ *       domain data objects, and pre-existing static {@code .drl} files—into the virtual file system, skipping only
+ *       metadata descriptors and any prior version of the target DRL file being replaced.</li>
+ *   <li><b>Version Increment:</b> Generates a new timestamp-suffixed {@link org.kie.api.builder.ReleaseId}
+ *       based on the container's current {@code groupId}, {@code artifactId}, and base version.</li>
+ *   <li><b>Rule Injection &amp; Compilation:</b> Writes the incoming DRL content to {@code src/main/resources/}
+ *       (automatically appending the {@code .drl} extension if omitted) alongside a {@code kmodule.xml} descriptor
+ *       targeting {@code defaultKieBase}, and compiles the module using the existing {@code KieContainer}'s
+ *       {@link ClassLoader} so project-defined Java fact types resolve cleanly.</li>
+ *   <li><b>Container Hot-Swap:</b> Invokes {@link org.kie.api.runtime.KieContainer#updateToVersion(org.kie.api.builder.ReleaseId)}
+ *       so subsequent Business Rules Tasks immediately evaluate against the updated rule base.</li>
+ * </ol>
+ *
+ * <h2>Expected Work Item Input Parameters</h2>
+ * <ul>
+ *   <li><b>{@code DrlContent}</b> ({@link String}, required) – The full text of the DRL rules to compile and deploy.
+ *       If {@code null} or blank, the update is skipped and the work item completes without modifying the container.</li>
+ *   <li><b>{@code RuleFileName}</b> ({@link String}, optional) – The target virtual file name for the DRL
+ *       (e.g., {@code "dynamic-rules.drl"}). Defaults to {@code "updatedRule.drl"} if omitted, and ensures a
+ *       {@code .drl} suffix is present.</li>
+ * </ul>
+ *
+ * <h2>Deployment &amp; Runtime Notes</h2>
+ * <ul>
+ *   <li><b>Runtime Strategy:</b> Designed for use with the <em>Per Process Instance</em> (or <em>Per Request</em>)
+ *       KIE runtime strategy so each process execution initializes a fresh {@link org.kie.api.runtime.KieSession}
+ *       from the updated {@code KieContainer}. Under a <em>Singleton</em> strategy, conditionless rules will not
+ *       re-fire across sequential runs.</li>
+ *   <li><b>Persistence:</b> Updates applied via {@code updateToVersion} reside in memory and will revert to the
+ *       deployed Maven artifact version if the KIE Server or container is restarted.</li>
+ * </ul>
+ *
+ * @author pjp
+ * @version 1.1.0
+ * @see org.kie.api.runtime.KieContainer#updateToVersion(org.kie.api.builder.ReleaseId)
+ * @see org.kie.api.builder.KieFileSystem
+ */
 public class DynamicDrlUpdateWorkItemHandler implements WorkItemHandler {
 
     // Simple timestamp-based versioning to guarantee uniqueness
