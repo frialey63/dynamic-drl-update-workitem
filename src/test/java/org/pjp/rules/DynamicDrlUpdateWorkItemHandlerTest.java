@@ -28,6 +28,28 @@ import org.kie.api.runtime.KieContainer;
 import org.kie.api.runtime.KieSession;
 import org.kie.api.runtime.process.WorkItemManager;
 
+/**
+ * Unit test suite for {@link DynamicDrlUpdateWorkItemHandler}.
+ *
+ * <p>Validates the in-memory KJAR rebuild and live {@link org.kie.api.runtime.KieContainer}
+ * hot-swap lifecycle without requiring a running jBPM/KIE Server instance. Before each test,
+ * an empty baseline KJAR ({@code org.pjp:dynamic-rules-test:1.0.0}) is compiled into a fresh
+ * {@code KieContainer} and injected into the handler under test.</p>
+ *
+ * <h2>Covered Scenarios</h2>
+ * <ul>
+ *   <li><b>Successful Hot-Swap:</b> Injects a valid DRL rule at runtime, verifies the
+ *       {@link org.kie.api.builder.ReleaseId} version is incremented, confirms work item completion,
+ *       and asserts that newly spawned {@link org.kie.api.runtime.KieSession} instances fire the
+ *       updated rule.</li>
+ *   <li><b>Compilation Failure Handling:</b> Supplies syntactically invalid DRL content and verifies
+ *       that a {@link RuntimeException} detailing the DRL compilation errors is thrown while leaving
+ *       the work item uncompleted.</li>
+ * </ul>
+ *
+ * @author pjp
+ * @see DynamicDrlUpdateWorkItemHandler
+ */
 class DynamicDrlUpdateWorkItemHandlerTest {
 
     private KieServices kieServices;
@@ -35,6 +57,10 @@ class DynamicDrlUpdateWorkItemHandlerTest {
     private ReleaseId initialReleaseId;
     private DynamicDrlUpdateWorkItemHandler handler;
 
+    /**
+     * Initializes a clean, empty in-memory KJAR and {@link KieContainer} before each test execution,
+     * then instantiates a fresh {@link DynamicDrlUpdateWorkItemHandler} bound to that container.
+     */
     @BeforeEach
     void setUp() {
         kieServices = KieServices.Factory.get();
@@ -53,6 +79,12 @@ class DynamicDrlUpdateWorkItemHandlerTest {
         handler = new DynamicDrlUpdateWorkItemHandler(kieContainer);
     }
 
+    /**
+     * Verifies that executing {@link DynamicDrlUpdateWorkItemHandler#executeWorkItem} with valid
+     * {@code DrlContent} and {@code RuleFileName} parameters compiles the new rule, increments
+     * the container's {@link ReleaseId} version, completes the work item, and makes the rule
+     * immediately active for subsequent {@link KieSession} instances.
+     */
     @Test
     void testExecuteWorkItem_UpdatesContainerAndFiresTrivialRule() {
         // Arrange: Define the trivial DRL
@@ -99,6 +131,12 @@ class DynamicDrlUpdateWorkItemHandlerTest {
         }
     }
 
+    /**
+     * Verifies that submitting syntactically invalid DRL causes
+     * {@link DynamicDrlUpdateWorkItemHandler#executeWorkItem} to fail fast by throwing a
+     * {@link RuntimeException} containing compilation error details without invoking
+     * {@link WorkItemManager#completeWorkItem(long, Map)}.
+     */
     @Test
     void testExecuteWorkItem_InvalidDrlThrowsException() {
         // Arrange: Malformed DRL
